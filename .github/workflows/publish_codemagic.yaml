@@ -1,0 +1,69 @@
+name: Publish Codemagic
+
+on:
+  push:
+    branches:
+      - master
+      - staging
+
+jobs:
+    publish:
+        name: Publish Codemagic
+        runs-on: ubuntu-latest
+        steps:
+          - name: Checkout code
+            uses: actions/checkout@v3
+            with:
+              fetch-depth: 0  # Fetch all history for all branches and tags
+          
+          - name: Get the last version on pubspec.yaml
+            id: get_current_version
+            run: |
+              current_version=$(grep '^version:' pubspec.yaml | sed 's/version: //')
+              echo "Current version: $current_version"
+              echo "current_version=$current_version" >> $GITHUB_ENV
+
+          - name: Get current branch name
+            id: get_branch_name
+            run: |
+              branch_name=${GITHUB_REF##*/}
+              echo "Branch name: $branch_name"
+              echo ::set-output name=branch_name::$branch_name
+
+          - name: Get workflowId 
+            id: get_workflow_id
+            run: |
+              current_version="${{ env.current_version }}"
+              echo "Current version: $current_version"
+              echo "ref_name: ${{ github.ref_name }}"
+              workflowId=""
+              if [[ "$current_version" == *"-patch"* ]]; then
+                if [[ "$current_version" == *"-android"* ]]; then
+                  workflowId="patch-android"
+                  echo "patch-android"
+                elif [[ "$current_version" == *"-ios"* ]]; then
+                  workflowId="patch-ios"
+                  echo "patch-ios"
+                else
+                  workflowId="patch"
+                  echo "patch"
+                fi
+              else
+                workflowId="release"
+                echo "release"
+              fi
+
+              if [[ "${{ steps.get_branch_name.outputs.branch_name }}" == "staging" ]]; then
+                    workflowId="${workflowId}-staging"
+                fi
+
+              echo "workflowId: $workflowId"
+              echo ::set-output name=workflowId::$workflowId
+          
+          - name: Publish Codemagic
+            run: |
+              RESPONSE=$(curl -H "Content-Type: application/json" -H "x-auth-token: ${{ secrets.CM_AUTH_TOKEN }}" --data '{"appId": "${{ secrets.CM_APP_ID }}","workflowId": "${{ steps.get_workflow_id.outputs.workflowId }}","branch": "${{ steps.get_branch_name.outputs.branch_name }}"}' https://api.codemagic.io/builds)
+              
+              echo "Response: $RESPONSE"
+
+              echo "post workflowId: ${{ steps.get_workflow_id.outputs.workflowId }}"

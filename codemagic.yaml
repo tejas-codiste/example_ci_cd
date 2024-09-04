@@ -1,0 +1,312 @@
+definitions:
+  prod_env_versions: &prod_env_versions
+    flutter: 3.22.3
+    xcode: latest
+    java: 17
+    android_signing:
+      - exampleCiCd-android-key
+    ios_signing:
+      distribution_type: app_store
+      bundle_identifier: com.hasankarli.exampleCiCd
+    groups:
+      - shorebird
+      - google_credentials
+    vars:
+      GOOGLE_PLAY_TRACK: "internal"
+  
+  staging_env_versions: &staging_env_versions
+    flutter: 3.22.3
+    xcode: latest
+    java: 17
+    android_signing:
+      - exampleCiCd-android-key
+    ios_signing:
+      distribution_type: app_store
+      bundle_identifier: com.hasankarli.exampleCiCd.stg
+    groups:
+      - shorebird
+      - google_credentials
+    vars:
+      GOOGLE_PLAY_TRACK: "internal"
+  
+  cache: &cache
+    cache_paths:
+        - $HOME/.pub-cache
+        - $FLUTTER_ROOT/.pub-cache
+        - $HOME/.gradle/caches
+        - $HOME/Library/Caches/CocoaPods
+    
+  scripts:
+    - &get_flavor
+      name: Get flavor
+      script: |
+        CURRENT_BRANCH=${CM_BRANCH}
+        if [[ "$CURRENT_BRANCH" == "master" ]]; then
+          FLAVOR="production"
+        elif [[ "$CURRENT_BRANCH" == "staging" ]]; then
+          FLAVOR="staging"
+        else
+          FLAVOR="development"
+        fi
+        echo "FLAVOR=$FLAVOR" >> $CM_ENV
+
+    - &extract_version
+      name: Extract version
+      script: |
+        #!/bin/sh
+        # Extract the version line from pubspec.yaml
+        VERSION_LINE=$(grep '^version:' pubspec.yaml)
+
+        if [ -z "$VERSION_LINE" ]; then
+          echo "Error: Version not found in pubspec.yaml"
+          exit 1
+        fi
+
+        # Extract build name (e.g., 1.0.4)
+        BUILD_NAME=$(echo $VERSION_LINE | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+')
+
+        # Extract build number (e.g., 13)
+        BUILD_NUMBER=$(echo $VERSION_LINE | grep -o '\+[0-9]\+' | tr -d '+')
+
+        echo "Starting build with version: $VERSION_LINE"
+        echo "BUILD_NAME=$BUILD_NAME"
+        echo "BUILD_NUMBER=$BUILD_NUMBER"
+
+        # Write variables to CM_ENV
+        echo "BUILD_NAME=$BUILD_NAME" >> $CM_ENV
+        echo "BUILD_NUMBER=$BUILD_NUMBER" >> $CM_ENV
+
+    - &set_keystore
+      name: Set up keystore.properties
+      script: | 
+        cat >> "$CM_BUILD_DIR/android/key.properties" <<EOF
+        storePassword=$CM_KEYSTORE_PASSWORD
+        keyPassword=$CM_KEY_PASSWORD
+        keyAlias=$CM_KEY_ALIAS
+        storeFile=$CM_KEYSTORE_PATH
+        EOF 
+
+    - &get_flutter_packages
+      name: Get Flutter packages
+      script: |
+        flutter packages pub get
+        echo "Flutter packages get done"
+    
+    - &flutter_analyze
+      name: Run static code analysis
+      script: flutter analyze
+      ignore_failure: true
+ 
+    - &setup_local_properties
+      name: Set up local.properties
+      script: echo "flutter.sdk=$HOME/programs/flutter" > "$CM_BUILD_DIR/android/local.properties"
+
+    - &xcode_project_use_profiles
+      name: Use Xcode profiles
+      script: xcode-project use-profiles
+
+    - &ios_pod_install
+      name: Pod install
+      script: |
+        cd ios && pod install --repo-update
+    
+    - &ios_build_ipa
+      name: Build IPA
+      script: flutter build ipa --release --flavor $FLAVOR -t lib/main_$FLAVOR.dart --export-options-plist=/Users/builder/export_options.plist
+    
+    - &android_build_aab
+      name: Build AAB
+      script: flutter build appbundle --release --flavor $FLAVOR -t lib/main_$FLAVOR.dart --obfuscate --split-debug-info=./build/app/outputs/bundle/$FLAVORRelease/symbols
+
+    - &shorebird_install
+      name: Install Shorebird CLI
+      script: |
+        # Install the Shorebird CLI
+        curl --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/shorebirdtech/install/main/install.sh -sSf | bash
+        # Set Shorebird PATH
+        echo PATH="/Users/builder/.shorebird/bin:$PATH" >> $CM_ENV
+
+    - &shorebird_android_release
+      name: Build with Shorebird for Android release
+      script: shorebird release android --flutter-version=3.22.3 --flavor $FLAVOR -t lib/main_$FLAVOR.dart -- --obfuscate --split-debug-info=./build/app/outputs/bundle/$FLAVORRelease/symbols
+
+    - &shorebird_ios_release
+      name: Build with Shorebird for iOS release
+      script: shorebird release ios --flutter-version=3.22.3 --flavor $FLAVOR -t lib/main_$FLAVOR.dart -- --export-options-plist=/Users/builder/export_options.plist
+
+    - &shorebird_android_patch
+      name: Build with Shorebird for Android patch
+      script: shorebird patch android --release-version "$BUILD_NAME"+"$BUILD_NUMBER" --flavor $FLAVOR -t lib/main_$FLAVOR.dart -- --obfuscate --split-debug-info=./build/app/outputs/bundle/$FLAVORRelease/symbols
+
+    - &shorebird_ios_patch
+      name: Build with Shorebird for iOS patch
+      script: shorebird patch ios --release-version "$BUILD_NAME"+"$BUILD_NUMBER" --flavor $FLAVOR -t lib/main_$FLAVOR.dart -- --export-options-plist=/Users/builder/export_options.plist
+
+  
+  publishing_store: &publishing_store
+    google_play:
+      credentials: $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
+      track: $GOOGLE_PLAY_TRACK
+      submit_as_draft: false
+    app_store_connect:
+      auth: integration
+      submit_to_testflight: false
+      submit_to_app_store: false
+
+  publishing_notifications: &publishing_notifications
+    email:
+      recipients:
+        - karlihasann@gmail.com
+    slack:
+      channel: '#builds'
+      notify_on_build_start: true
+      notify:
+        success: true 
+        failure: true
+
+  release_scripts: &release_scripts
+    scripts:
+      - *get_flavor
+      - *extract_version
+      - *set_keystore
+      - *get_flutter_packages
+      - *flutter_analyze
+      - *setup_local_properties
+      - *xcode_project_use_profiles
+      - *ios_pod_install
+      - *ios_build_ipa
+      - *android_build_aab
+      - *shorebird_install
+      - *shorebird_android_release
+      - *shorebird_ios_release
+  
+  patch_scripts: &patch_scripts
+    scripts:
+      - *get_flavor
+      - *extract_version
+      - *set_keystore
+      - *get_flutter_packages
+      - *flutter_analyze
+      - *setup_local_properties
+      - *xcode_project_use_profiles
+      - *shorebird_install
+      - *shorebird_android_patch
+      - *shorebird_ios_patch
+
+workflows:
+  release:
+    name: Release Apps Workflow
+    instance_type: mac_mini_m1
+    max_build_duration: 60
+    environment:
+      <<: *prod_env_versions
+    cache:
+      <<: *cache
+    integrations:
+      app_store_connect: ExampleCiCd
+    
+    <<: *release_scripts
+
+    artifacts:
+      - build/**/outputs/**/*.aab
+      - build/**/outputs/**/mapping.txt
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+      - flutter_drive.log
+    publishing:
+      <<: *publishing_store
+      <<: *publishing_notifications
+
+  release-staging:
+    name: Release Apps Workflow
+    instance_type: mac_mini_m1
+    max_build_duration: 60
+    environment:
+      <<: *staging_env_versions
+    cache:
+      <<: *cache
+    integrations:
+      app_store_connect: ExampleCiCd
+    
+    <<: *release_scripts
+
+    artifacts:
+      - build/**/outputs/**/*.aab
+      - build/**/outputs/**/mapping.txt
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+      - flutter_drive.log
+    publishing:
+      <<: *publishing_store
+      <<: *publishing_notifications
+    
+  patch:
+    name: Patch Apps Workflow
+    instance_type: mac_mini_m1
+    max_build_duration: 60
+    environment:
+      <<: *prod_env_versions
+    cache:
+      <<: *cache
+    
+    <<: *patch_scripts
+    publishing:
+      <<: *publishing_notifications
+    
+  patch-staging:
+    name: Patch Apps Workflow
+    instance_type: mac_mini_m1
+    max_build_duration: 60
+    environment:
+      <<: *staging_env_versions
+    cache:
+      <<: *cache
+    
+    <<: *patch_scripts
+    publishing:
+      <<: *publishing_notifications
+
+  
+  patch-android:
+    name: Patch Android Workflow
+    instance_type: mac_mini_m1
+    max_build_duration: 60
+    environment:
+      <<: *prod_env_versions
+    cache:
+      <<: *cache
+    
+    scripts:
+      - *get_flavor
+      - *extract_version
+      - *set_keystore
+      - *get_flutter_packages
+      - *flutter_analyze
+      - *setup_local_properties
+      - *shorebird_install
+      - *shorebird_android_patch
+
+    publishing:
+      <<: *publishing_notifications
+
+  patch-ios:
+    name: Patch iOS Workflow
+    instance_type: mac_mini_m1
+    max_build_duration: 60
+    environment:
+      <<: *prod_env_versions
+    cache:
+      <<: *cache
+    
+    scripts:
+      - *get_flavor
+      - *extract_version
+      - *set_keystore
+      - *get_flutter_packages
+      - *flutter_analyze
+      - *setup_local_properties
+      - *shorebird_install
+      - *shorebird_ios_patch
+
+    publishing:
+      <<: *publishing_notifications
