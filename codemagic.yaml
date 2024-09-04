@@ -189,6 +189,7 @@ definitions:
       - *flutter_analyze
       - *setup_local_properties
       - *xcode_project_use_profiles
+      - *ios_pod_install
       - *shorebird_install
       - *shorebird_android_patch
       - *shorebird_ios_patch
