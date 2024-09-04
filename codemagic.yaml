@@ -203,7 +203,7 @@ workflows:
     cache:
       <<: *cache
     integrations:
-      app_store_connect: ExampleCiCd
+      app_store_connect: Codemagic API Key
     
     <<: *release_scripts
 
@@ -226,7 +226,7 @@ workflows:
     cache:
       <<: *cache
     integrations:
-      app_store_connect: ExampleCiCd
+      app_store_connect: Codemagic API Key
     
     <<: *release_scripts
 
