@@ -1,19 +1,47 @@
 name: example_ci_cd
 description: "A new Flutter project."
-publish_to: 'none'
+publish_to: "none"
 version: 0.1.0
 
 environment:
-  sdk: '>=3.4.4 <4.0.0'
+  sdk: ">=3.4.4 <4.0.0"
 
 dependencies:
   flutter:
     sdk: flutter
+  shorebird_code_push: ^1.1.4
 
 dev_dependencies:
+  flutter_flavorizr: ^2.2.3
+  flutter_lints: ^3.0.0
   flutter_test:
     sdk: flutter
-  flutter_lints: ^3.0.0
 
 flutter:
+  assets:
+    - shorebird.yaml
   uses-material-design: true
+
+flavorizr:
+  flavors:
+    development:
+      app:
+        name: "[DEV] CI/CD"
+      android:
+        applicationId: "com.hasankarli.exampleCiCd.dev"
+      ios:
+        bundleId: "com.hasankarli.exampleCiCd.dev"
+    staging:
+      app:
+        name: "[STG] CI/CD"
+      android:
+        applicationId: "com.hasankarli.exampleCiCd.stg"
+      ios:
+        bundleId: "com.hasankarli.exampleCiCd.stg"
+    production:
+      app:
+        name: "CI/CD"
+      android:
+        applicationId: "com.hasankarli.exampleCiCd"
+      ios:
+        bundleId: "com.hasankarli.exampleCiCd"
