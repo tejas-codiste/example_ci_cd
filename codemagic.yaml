@@ -306,6 +306,8 @@ workflows:
       - *get_flutter_packages
       - *flutter_analyze
       - *setup_local_properties
+      - *xcode_project_use_profiles
+      - *ios_pod_install
       - *shorebird_install
       - *shorebird_ios_patch
 
